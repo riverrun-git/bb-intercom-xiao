@@ -49,6 +49,7 @@ const char *MQTT_TOPIC_AUDIO_BASELINE = "/intercom/audio/baseline";
 const char *MQTT_TOPIC_AUDIO_SAMPLE_RATE = "/intercom/audio/samplerate";
 const char *MQTT_TOPIC_AUDIO_EVENT = "/intercom/audio/event";
 const char *MQTT_TOPIC_INFO = "/intercom/info";
+const char *MQTT_TOPIC_TIME = "/intercom/time"; // incoming
 String mqtt_status = "MQTT inactive";
 
 WiFiClient wifiClient;               // The Wifi connection
@@ -446,8 +447,10 @@ void mqttCallback(char *topic, byte *message, unsigned int length)
   print(topic);
   print("=");
   println(messageString.c_str());
-  // Here we could do something based on the message received. (Remote control from Node Red)
-  // Nothing so far.
+  if (strcmp(topic, MQTT_TOPIC_TIME) == 0) {
+    statusText = (char *)messageString.c_str();
+    displayStatus();
+  }
 }
 
 // Setup the MQTT connection to the broker
@@ -474,6 +477,7 @@ void setupMQTT()
       // Make sure we publish stuff so they are available in Node Red right away
       publishInteger(MQTT_TOPIC_AUDIO_BASELINE, baseLine);
       publishInteger(MQTT_TOPIC_AUDIO_SAMPLE_RATE, sampleFrequency);
+      mqttClient.subscribe(MQTT_TOPIC_TIME);
     }
     else
     {
