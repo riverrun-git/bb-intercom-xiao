@@ -341,36 +341,42 @@ void setupSDCard()
 // Variables for dealing with all things audio
 // Larger values than 256 lead to crashes. 256 works and we want as many samples as possible.
 #define SAMPLES 256
-uint16_t detectInterval = 50;          // time in ms between acquiring audio samples
-uint16_t publishInterval = 1000;       // Publish once a second to keep graphs moving
-uint16_t sampleFrequency = 14000;      // in Hertz
-uint16_t samples[SAMPLES];             // The buffer holding the audio samples
-uint16_t baseLine = 0;                 // The measured audio samples vary around this value.
-uint16_t loudThreshold;                // When is a signal "loud" - this should somehow be configurable
-uint16_t loudness = 0;                 // A measurement of how loud the signal is. Needs looking at.
-unsigned long lastCheck;               // timestamp of the last time we acquired audio data
-unsigned long lastPublish;             // timestamp when last forced a publish of audio data
-unsigned long loudStart = 0;           // timestamp of the first loud event detected after silence
+uint16_t detectInterval = 50;     // time in ms between acquiring audio samples
+uint16_t publishInterval = 1000;  // Publish once a second to keep graphs moving
+uint16_t sampleFrequency = 14000; // in Hertz
+uint16_t oneSampleMicros = 0;     // computed later - how long does one sample take at the sample frequency
+uint16_t samples[SAMPLES];        // The buffer holding the audio samples
+uint16_t baseLine = 0;            // The measured audio samples vary around this value.
+uint16_t loudThreshold;           // When is a signal "loud" - this should somehow be configurable
+uint16_t loudness = 0;            // A measurement of how loud the signal is. Needs looking at.
+unsigned long lastCheck;          // timestamp of the last time we acquired audio data
+unsigned long lastPublish;        // timestamp when last forced a publish of audio data
+unsigned long loudStart = 0;      // timestamp of the first loud event detected after silence
 unsigned long minimumRingDuration = 2000;
 uint16_t minimumRingLoudness = 1100;
 uint16_t minimumRingFrequency = 1800;
+
 // read audio data from the ADC into the samples buffer at the sampleFrequency
 void readSamples()
 {
-  // first figure out how long each sample takes
-  double oneSampleMicros = 1.0 / sampleFrequency * 1000000.0; // in microseconds
-  /*
-  char buffer[50];
-  sprintf(buffer, "One %.2fus - total: %.2fms", oneSampleMicros, oneSampleMicros * SAMPLES / 1000.0);
-  println(buffer);
-  */
+  if (oneSampleMicros == 0)
+  {
+    oneSampleMicros = 1.0 / sampleFrequency * 1000000.0; // in microseconds
+  }
   unsigned long start = micros(); // to measure how long the acquisition took
   unsigned long next = start;     // acquisition is duw now
   // loop until all the samples have been taken
   for (uint16_t index = 0; index < SAMPLES; index += 1)
   {
+    uint16_t loopCount = 0;
     while (next > micros())
     {
+      loopCount++;
+      if (loopCount > 100)
+      {
+        println("Overflow");
+        break;
+      }
       // loop until next sample is due
     }
     // Read the sample from the ADC
@@ -447,7 +453,8 @@ void mqttCallback(char *topic, byte *message, unsigned int length)
   print(topic);
   print("=");
   println(messageString.c_str());
-  if (strcmp(topic, MQTT_TOPIC_TIME) == 0) {
+  if (strcmp(topic, MQTT_TOPIC_TIME) == 0)
+  {
     statusText = (char *)messageString.c_str();
     displayStatus();
   }
@@ -738,7 +745,9 @@ void doFFT()
       numberOfLoudIntervals = 1;
       sumOfLoudness = loudness;
       sumOfPeaks = peak;
-    } else {
+    }
+    else
+    {
       // Was loud and still is
       numberOfLoudIntervals++;
       sumOfLoudness += loudness;
@@ -750,13 +759,17 @@ void doFFT()
     // This whole process might need some refinement
     // The intercom is detected by:
     // Has it been loud for quite a while?
-    if (!ringing && millis() - loudStart > minimumRingDuration) {
+    if (!ringing && millis() - loudStart > minimumRingDuration)
+    {
       // Is the signal actuall quite loud?
-      if (sumOfLoudness / numberOfLoudIntervals > minimumRingLoudness) {
+      if (sumOfLoudness / numberOfLoudIntervals > minimumRingLoudness)
+      {
         // Is the frequency quite high?
-        if (sumOfPeaks / numberOfLoudIntervals > minimumRingFrequency) {
+        if (sumOfPeaks / numberOfLoudIntervals > minimumRingFrequency)
+        {
           // It all checks out - assume it's the intercom
-          if (millis() - lastTrigger > 10*1000) {
+          if (millis() - lastTrigger > 10 * 1000)
+          {
             lastTrigger = millis();
             ringing = true;
             handleIntercomOn();
@@ -775,7 +788,8 @@ void doFFT()
       unsigned long duration = millis() - loudStart;
       sprintf(buffer, "Was loud for %dms", duration);
       println(buffer);
-      if (ringing) {
+      if (ringing)
+      {
         ringing = false;
         handleIntercomOff();
       }
