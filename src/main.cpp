@@ -280,18 +280,18 @@ void publishString(const char *topic, char *value)
   publishString(topic, value, true);
 }
 
-void publishAudioEvent(const char *topic, uint16_t loudness, double peak, boolean retain)
+void publishAudioEvent(const char *topic, uint16_t loudness, double peak, double inRangePercent, boolean retain)
 {
   // We publish an event containing loudness and peak as a JSON object.
   // Instead of installing yet another library for this one purpose - let's cheat
   char buffer[64];
-  sprintf(buffer, "{\"loudness\": %d,\"peak\": %d}", loudness, static_cast<uint16_t>(peak));
+  sprintf(buffer, "{\"loudness\": %d,\"peak\": %.0f, \"inrange\": %.2f}", loudness, peak, inRangePercent);
   publishString(topic, buffer, retain);
 }
 
-void publishAudioEvent(const char *topic, uint16_t loudness, double peak)
+void publishAudioEvent(const char *topic, uint16_t loudness, double peak, double inRangePercent)
 {
-  publishAudioEvent(topic, loudness, peak, true);
+  publishAudioEvent(topic, loudness, peak, inRangePercent, true);
 }
 
 // This will reboot the ESP32 after a 5 second countdown
@@ -355,6 +355,10 @@ unsigned long loudStart = 0;      // timestamp of the first loud event detected 
 unsigned long minimumRingDuration = 2000;
 uint16_t minimumRingLoudness = 1100;
 uint16_t minimumRingFrequency = 1800;
+uint8_t ranges = 5;
+double ranges_low[5] = {0, 0, 0, 0, 0};
+double ranges_high[5] = {0, 0, 0, 0, 0};
+double minimumPercentInRanges = 0; // works mostly with this, but pick higher value in config
 
 // read audio data from the ADC into the samples buffer at the sampleFrequency
 void readSamples()
@@ -646,6 +650,50 @@ void keyValuePair(const char *key, const char *value)
     {
       minimumRingFrequency = strtoul(value, 0, 10);
     }
+    else if (strcmp(key, "range_1_low") == 0)
+    {
+      ranges_low[0] = strtod(value, 0);
+    }
+    else if (strcmp(key, "range_2_low") == 0)
+    {
+      ranges_low[1] = strtod(value, 0);
+    }
+    else if (strcmp(key, "range_3_low") == 0)
+    {
+      ranges_low[2] = strtod(value, 0);
+    }
+    else if (strcmp(key, "range_4_low") == 0)
+    {
+      ranges_low[3] = strtod(value, 0);
+    }
+    else if (strcmp(key, "range_5_low") == 0)
+    {
+      ranges_low[4] = strtod(value, 0);
+    }
+    else if (strcmp(key, "range_1_high") == 0)
+    {
+      ranges_high[0] = strtod(value, 0);
+    }
+    else if (strcmp(key, "range_2_high") == 0)
+    {
+      ranges_high[1] = strtod(value, 0);
+    }
+    else if (strcmp(key, "range_3_high") == 0)
+    {
+      ranges_high[2] = strtod(value, 0);
+    }
+    else if (strcmp(key, "range_4_high") == 0)
+    {
+      ranges_high[3] = strtod(value, 0);
+    }
+    else if (strcmp(key, "range_5_high") == 0)
+    {
+      ranges_high[4] = strtod(value, 0);
+    }
+    else if (strcmp(key, "percent_in_ranges") == 0)
+    {
+      minimumPercentInRanges = strtod(value, 0);
+    }
     else
     {
       // That was a key we don't know
@@ -705,14 +753,29 @@ double relativeChangePercent(double reference, double value)
 bool ringing = false;
 uint16_t lastTrigger = 0;
 uint16_t numberOfLoudIntervals;
+uint16_t numberOfInRangesIntervals;
 double sumOfLoudness;
 double sumOfPeaks;
+
+// Check if the measured peak frequency falls within any of the ranges we consider interesting
+bool isInRanges(double frequency)
+{
+  for (uint8_t index = 0; index < ranges; index += 1)
+  {
+    if (ranges_low[index] <= frequency && ranges_high[index] >= frequency)
+    {
+      return true;
+    }
+  }
+  return false;
+}
 
 // Do the hard work
 // Called several times per second to do all the detection work
 void doFFT()
 {
   char buffer[150];
+  double inRange;
   // Read the samples from the ADC
   readSamples();
   // Calculate some measure of how loud the samples are
@@ -743,6 +806,7 @@ void doFFT()
       // The last samples were not considered loud. These are.
       loudStart = millis();
       numberOfLoudIntervals = 1;
+      numberOfInRangesIntervals = isInRanges(peak) ? 1 : 0;
       sumOfLoudness = loudness;
       sumOfPeaks = peak;
     }
@@ -750,10 +814,13 @@ void doFFT()
     {
       // Was loud and still is
       numberOfLoudIntervals++;
+      numberOfInRangesIntervals += isInRanges(peak) ? 1 : 0;
       sumOfLoudness += loudness;
       sumOfPeaks += peak;
     }
-    publishAudioEvent(MQTT_TOPIC_AUDIO_EVENT, loudness, peak);
+    double percentInRange = static_cast<double>(numberOfInRangesIntervals) / static_cast<double>(numberOfLoudIntervals) * 100.0;
+    inRange = percentInRange;
+    publishAudioEvent(MQTT_TOPIC_AUDIO_EVENT, loudness, peak, percentInRange);
     lastPublish = millis();
     // Now we can do the actual detecting of the intercom
     // This whole process might need some refinement
@@ -767,12 +834,16 @@ void doFFT()
         // Is the frequency quite high?
         if (sumOfPeaks / numberOfLoudIntervals > minimumRingFrequency)
         {
-          // It all checks out - assume it's the intercom
-          if (millis() - lastTrigger > 10 * 1000)
+          // Finally check if enough samples where within the specified frequency ranges
+          if (percentInRange > minimumPercentInRanges)
           {
-            lastTrigger = millis();
-            ringing = true;
-            handleIntercomOn();
+            // It all checks out - assume it's the intercom
+            if (millis() - lastTrigger > 5 * 1000) // not more than every 5 seconds
+            {
+              lastTrigger = millis();
+              ringing = true;
+              handleIntercomOn();
+            }
           }
         }
       }
@@ -786,7 +857,7 @@ void doFFT()
       // was loud - is no longer
       // Just logging for now. Could be used to trigger stuff
       unsigned long duration = millis() - loudStart;
-      sprintf(buffer, "Was loud for %dms", duration);
+      sprintf(buffer, "Was loud for %dms %.1f%%", duration, inRange);
       println(buffer);
       if (ringing)
       {
@@ -795,7 +866,7 @@ void doFFT()
       }
     }
     loudStart = 0; // No longer loud
-    publishAudioEvent(MQTT_TOPIC_AUDIO_EVENT, 0, 0.0);
+    publishAudioEvent(MQTT_TOPIC_AUDIO_EVENT, 0, 0.0, 0.0);
     lastPublish = millis();
   }
 }
