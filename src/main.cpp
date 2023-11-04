@@ -355,9 +355,9 @@ unsigned long loudStart = 0;      // timestamp of the first loud event detected 
 unsigned long minimumRingDuration = 2000;
 uint16_t minimumRingLoudness = 1100;
 uint16_t minimumRingFrequency = 1800;
-uint8_t ranges = 5;
-double ranges_low[5] = {0, 0, 0, 0, 0};
-double ranges_high[5] = {0, 0, 0, 0, 0};
+uint8_t ranges = 9;
+double ranges_low[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+double ranges_high[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
 double minimumPercentInRanges = 0; // works mostly with this, but pick higher value in config
 
 // read audio data from the ADC into the samples buffer at the sampleFrequency
@@ -670,6 +670,22 @@ void keyValuePair(const char *key, const char *value)
     {
       ranges_low[4] = strtod(value, 0);
     }
+    else if (strcmp(key, "range_6_low") == 0)
+    {
+      ranges_low[5] = strtod(value, 0);
+    }
+    else if (strcmp(key, "range_7_low") == 0)
+    {
+      ranges_low[6] = strtod(value, 0);
+    }
+    else if (strcmp(key, "range_8_low") == 0)
+    {
+      ranges_low[7] = strtod(value, 0);
+    }
+    else if (strcmp(key, "range_9_low") == 0)
+    {
+      ranges_low[8] = strtod(value, 0);
+    }
     else if (strcmp(key, "range_1_high") == 0)
     {
       ranges_high[0] = strtod(value, 0);
@@ -689,6 +705,22 @@ void keyValuePair(const char *key, const char *value)
     else if (strcmp(key, "range_5_high") == 0)
     {
       ranges_high[4] = strtod(value, 0);
+    }
+    else if (strcmp(key, "range_6_high") == 0)
+    {
+      ranges_high[5] = strtod(value, 0);
+    }
+    else if (strcmp(key, "range_7_high") == 0)
+    {
+      ranges_high[6] = strtod(value, 0);
+    }
+    else if (strcmp(key, "range_8_high") == 0)
+    {
+      ranges_high[7] = strtod(value, 0);
+    }
+    else if (strcmp(key, "range_9_high") == 0)
+    {
+      ranges_high[8] = strtod(value, 0);
     }
     else if (strcmp(key, "percent_in_ranges") == 0)
     {
