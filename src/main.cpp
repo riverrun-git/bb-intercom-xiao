@@ -32,10 +32,36 @@ void println(const char *text)
 char hostname[32] = "hostname"; // Override in config
 const char *ssid = "Searching"; // displayed as a placeholder while not connected
 
-// Up to 3 Wifi networks can be defined in the config file
-const int wifiSSIDCount = 3;
-char wifiSSIDs[3][32] = {"", "", ""};
-char wifiPasswords[3][32] = {"", "", ""};
+struct WiFiCredentials
+{
+  char ssid[32]; // 32 seems long enough for SSID or password
+  char password[32];
+};
+
+#define MAXIMUM_NUMBER_OF_CREDENTIALS 4
+
+const WiFiCredentials *wifiCredentials[MAXIMUM_NUMBER_OF_CREDENTIALS];
+size_t wifiCredentialCount = 0; // Ho wmany have actually been defined?
+
+void addWifiCredentials(const char *ssid, const char *password)
+{
+  // Make copies of the ssid and password variables.
+  if (wifiCredentialCount < MAXIMUM_NUMBER_OF_CREDENTIALS)
+  {
+    WiFiCredentials *credentials = new WiFiCredentials();
+
+    // Ensure the destination arrays are null-terminated.
+    strncpy(credentials->ssid, ssid, sizeof(credentials->ssid) - 1);
+    credentials->ssid[sizeof(credentials->ssid) - 1] = '\0';
+
+    strncpy(credentials->password, password, sizeof(credentials->password) - 1);
+    credentials->password[sizeof(credentials->password) - 1] = '\0';
+
+    // store the new credentials
+    wifiCredentials[wifiCredentialCount] = credentials;
+    wifiCredentialCount += 1;
+  }
+}
 
 // MQTT Broker - the actual settings need to be in the config file
 char mqttBroker[32] = "mqtt.local";
@@ -141,6 +167,12 @@ void displayStatus()
 void setupWifi()
 {
   println("Connecting to WiFi");
+  for (size_t index = 0; index < wifiCredentialCount; index += 1)
+  {
+    char buffer[100];
+    sprintf(buffer, "%s@%s", wifiCredentials[index]->ssid, wifiCredentials[index]->password);
+    println(buffer);
+  }
   // We start by connecting to a WiFi network
   WiFi.disconnect(); // just in case
   WiFi.setHostname(hostname);
@@ -170,14 +202,14 @@ void setupWifi()
         print(" ");
         println(WiFi.SSID(index1).c_str());
         // try all known networks
-        for (int index2 = 0; index2 < wifiSSIDCount; index2 += 1)
+        for (int index2 = 0; index2 < wifiCredentialCount; index2 += 1)
         {
           // Does the visible network have the SSID of this known network?
-          if (strcmp(wifiSSIDs[index2], WiFi.SSID(index1).c_str()) != 0)
+          if (strcmp(wifiCredentials[index2]->ssid, WiFi.SSID(index1).c_str()) != 0)
           {
             // not equal
             print("Not matching ");
-            println(wifiSSIDs[index2]);
+            println(wifiCredentials[index2]->ssid);
           }
           else
           {
@@ -195,9 +227,9 @@ void setupWifi()
       if (wifiFound >= 0)
       {
         // We are going to try and connect to this network
-        ssid = wifiSSIDs[wifiFound];
+        ssid = wifiCredentials[wifiFound]->ssid;
         displayStatus();
-        WiFi.begin(ssid, wifiPasswords[wifiFound]);
+        WiFi.begin(ssid, wifiCredentials[wifiFound]->password);
         int attempts = 10; // We attempt only a limited number of times
         // we have a WiFi we can try and connect to
         while (WiFi.status() != WL_CONNECTED && attempts > 0)
@@ -333,6 +365,8 @@ void setupSDCard()
   if (!SD.begin(D2))
   {
     println("Failed");
+    statusText = (char *)"SD card not found";
+    displayStatus();
     return;
   }
   println("SD Card Ready.");
@@ -355,11 +389,33 @@ unsigned long loudStart = 0;      // timestamp of the first loud event detected 
 unsigned long minimumRingDuration = 2000;
 uint16_t minimumRingLoudness = 1100;
 uint16_t minimumRingFrequency = 1800;
-uint8_t ranges = 9;
-double ranges_low[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
-double ranges_high[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
 double minimumPercentInRanges = 0; // works mostly with this, but pick higher value in config
 
+// We store frequency ranges for detection in data structures like this:
+struct Range
+{
+  double low;
+  double high;
+};
+
+#define MAXIMUM_NUMBER_OF_RANGES 32
+const Range *ranges[MAXIMUM_NUMBER_OF_RANGES]; // 32 should be enough
+size_t rangeCount = 0;
+
+// Called when a new range is found in the config file
+void addRange(double low, double high)
+{
+  if (rangeCount < MAXIMUM_NUMBER_OF_RANGES)
+  {
+    Range *range = new Range();
+
+    range->low = low;
+    range->high = high;
+
+    ranges[rangeCount] = range;
+    rangeCount += 1;
+  }
+}
 // read audio data from the ADC into the samples buffer at the sampleFrequency
 void readSamples()
 {
@@ -375,7 +431,7 @@ void readSamples()
     uint16_t loopCount = 0;
     while (next > micros())
     {
-      loopCount++;
+      loopCount += 1;
       if (loopCount > 100)
       {
         println("Overflow");
@@ -586,29 +642,47 @@ void keyValuePair(const char *key, const char *value)
     {
       strcpy(hostname, value);
     }
-    else if (strcmp(key, "wifi1_ssid") == 0)
+    else if (strcmp(key, "wifi") == 0)
     {
-      strcpy(wifiSSIDs[0], value);
+      char ssid[32];
+      char password[32];
+      char *token = strtok((char *)value, ":");
+      if (token != NULL)
+      {
+        strncpy(ssid, token, sizeof(ssid) - 1);
+        ssid[sizeof(ssid) - 1] = '\0';
+        token = strtok(NULL, ":");
+        if (token != NULL)
+        {
+          strncpy(password, token, sizeof(password) - 1);
+          password[sizeof(password) - 1] = '\0';
+        }
+        if (ssid[0] != '\0' && password[0] != '\0')
+        {
+          addWifiCredentials(ssid, password);
+        }
+      }
     }
-    else if (strcmp(key, "wifi1_password") == 0)
+    else if (strcmp(key, "range") == 0)
     {
-      strcpy(wifiPasswords[0], value);
-    }
-    else if (strcmp(key, "wifi2_ssid") == 0)
-    {
-      strcpy(wifiSSIDs[1], value);
-    }
-    else if (strcmp(key, "wifi2_password") == 0)
-    {
-      strcpy(wifiPasswords[1], value);
-    }
-    else if (strcmp(key, "wifi3_ssid") == 0)
-    {
-      strcpy(wifiSSIDs[2], value);
-    }
-    else if (strcmp(key, "wifi3_password") == 0)
-    {
-      strcpy(wifiPasswords[2], value);
+      char low[32];
+      char high[32];
+      char *token = strtok((char *)value, ":");
+      if (token != NULL)
+      {
+        strncpy(low, token, sizeof(low) - 1);
+        low[sizeof(low) - 1] = '\0';
+        token = strtok(NULL, ":");
+        if (token != NULL)
+        {
+          strncpy(high, token, sizeof(high) - 1);
+          high[sizeof(high) - 1] = '\0';
+        }
+        if (low[0] != '\0' && high[0] != '\0')
+        {
+          addRange(atof(low), atof(high));
+        }
+      }
     }
     else if (strcmp(key, "mqtt_broker") == 0)
     {
@@ -649,78 +723,6 @@ void keyValuePair(const char *key, const char *value)
     else if (strcmp(key, "minimum_frequency_hz") == 0)
     {
       minimumRingFrequency = strtoul(value, 0, 10);
-    }
-    else if (strcmp(key, "range_1_low") == 0)
-    {
-      ranges_low[0] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_2_low") == 0)
-    {
-      ranges_low[1] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_3_low") == 0)
-    {
-      ranges_low[2] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_4_low") == 0)
-    {
-      ranges_low[3] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_5_low") == 0)
-    {
-      ranges_low[4] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_6_low") == 0)
-    {
-      ranges_low[5] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_7_low") == 0)
-    {
-      ranges_low[6] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_8_low") == 0)
-    {
-      ranges_low[7] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_9_low") == 0)
-    {
-      ranges_low[8] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_1_high") == 0)
-    {
-      ranges_high[0] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_2_high") == 0)
-    {
-      ranges_high[1] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_3_high") == 0)
-    {
-      ranges_high[2] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_4_high") == 0)
-    {
-      ranges_high[3] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_5_high") == 0)
-    {
-      ranges_high[4] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_6_high") == 0)
-    {
-      ranges_high[5] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_7_high") == 0)
-    {
-      ranges_high[6] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_8_high") == 0)
-    {
-      ranges_high[7] = strtod(value, 0);
-    }
-    else if (strcmp(key, "range_9_high") == 0)
-    {
-      ranges_high[8] = strtod(value, 0);
     }
     else if (strcmp(key, "percent_in_ranges") == 0)
     {
@@ -792,9 +794,9 @@ double sumOfPeaks;
 // Check if the measured peak frequency falls within any of the ranges we consider interesting
 bool isInRanges(double frequency)
 {
-  for (uint8_t index = 0; index < ranges; index += 1)
+  for (uint8_t index = 0; index < rangeCount; index += 1)
   {
-    if (ranges_low[index] <= frequency && ranges_high[index] >= frequency)
+    if (ranges[index]->low <= frequency && ranges[index]->high >= frequency)
     {
       return true;
     }
@@ -818,7 +820,7 @@ void doFFT()
     // // Some setup for the FFT
     double vReal[SAMPLES];
     double vImag[SAMPLES];
-    for (uint16_t i = 0; i < SAMPLES; i++)
+    for (uint16_t i = 0; i < SAMPLES; i += 1)
     {
       vReal[i] = samples[i];
       vImag[i] = 0.0; // Imaginary part must be zeroed in case of looping to avoid wrong calculations and overflows
@@ -845,7 +847,7 @@ void doFFT()
     else
     {
       // Was loud and still is
-      numberOfLoudIntervals++;
+      numberOfLoudIntervals += 1;
       numberOfInRangesIntervals += isInRanges(peak) ? 1 : 0;
       sumOfLoudness += loudness;
       sumOfPeaks += peak;
