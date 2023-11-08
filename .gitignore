@@ -5,4 +5,5 @@
 .vscode/ipch
 .vscode/*sync-conflict*
 test_files/*
+config/config.actual.ini
 logs/

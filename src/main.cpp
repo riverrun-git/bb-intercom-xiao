@@ -381,13 +381,13 @@ uint16_t sampleFrequency = 14000; // in Hertz
 uint16_t oneSampleMicros = 0;     // computed later - how long does one sample take at the sample frequency
 uint16_t samples[SAMPLES];        // The buffer holding the audio samples
 uint16_t baseLine = 0;            // The measured audio samples vary around this value.
-uint16_t loudThreshold;           // When is a signal "loud" - this should somehow be configurable
 uint16_t loudness = 0;            // A measurement of how loud the signal is. Needs looking at.
 unsigned long lastCheck;          // timestamp of the last time we acquired audio data
 unsigned long lastPublish;        // timestamp when last forced a publish of audio data
 unsigned long loudStart = 0;      // timestamp of the first loud event detected after silence
 unsigned long minimumRingDuration = 2000;
-uint16_t minimumRingLoudness = 1100;
+uint16_t loudThreshold = 0.5;     // When is a signal "loud" - above [0..1] times baseLine - don't even FFT anything quieter
+double minimumRingLoudness = 0.6; // Again [0..1] times baseLine
 uint16_t minimumRingFrequency = 1800;
 double minimumPercentInRanges = 0; // works mostly with this, but pick higher value in config
 
@@ -491,11 +491,11 @@ void setupAudio()
     }
   }
   // The baseline is the average of all readings
+  // The values of our sample readings should be in the range [0...2*baseLine]
+  // The baseLine is basically the zero line of the samples
   baseLine = static_cast<uint16_t>(sum / SAMPLES);
   // and gets published on MQTT
   publishInteger(MQTT_TOPIC_AUDIO_BASELINE, baseLine);
-  // TODO: This needs to be configurable
-  loudThreshold = static_cast<uint16_t>(sum / SAMPLES / 4);
   sprintf(buffer, "%d..%d..%d", min, baseLine, max);
   println(buffer);
 }
@@ -712,13 +712,17 @@ void keyValuePair(const char *key, const char *value)
     {
       sampleFrequency = strtoul(value, 0, 10);
     }
-    else if (strcmp(key, "minimum_duration_ms") == 0)
+    else if (strcmp(key, "loud_threshold") == 0)
+    {
+      loudThreshold = strtod(value, 0);
+    }
+    else if (strcmp(key, "minimum_ring_duration_ms") == 0)
     {
       minimumRingDuration = strtoul(value, 0, 10);
     }
-    else if (strcmp(key, "minimum_loudness") == 0)
+    else if (strcmp(key, "minimum_ring_loudness") == 0)
     {
-      minimumRingLoudness = strtoul(value, 0, 10);
+      minimumRingLoudness = strtod(value, 0);
     }
     else if (strcmp(key, "minimum_frequency_hz") == 0)
     {
@@ -814,7 +818,7 @@ void doFFT()
   readSamples();
   // Calculate some measure of how loud the samples are
   computeLoudness();
-  if (loudness > loudThreshold)
+  if (loudness > static_cast<uint16_t>(baseLine * loudThreshold))
   {
     // The current sample is quite loud. Is it the intercom though?
     // // Some setup for the FFT
@@ -863,7 +867,7 @@ void doFFT()
     if (!ringing && millis() - loudStart > minimumRingDuration)
     {
       // Is the signal actuall quite loud?
-      if (sumOfLoudness / numberOfLoudIntervals > minimumRingLoudness)
+      if (sumOfLoudness / numberOfLoudIntervals > baseLine * minimumRingLoudness)
       {
         // Is the frequency quite high?
         if (sumOfPeaks / numberOfLoudIntervals > minimumRingFrequency)
