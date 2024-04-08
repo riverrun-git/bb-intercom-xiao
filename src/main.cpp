@@ -75,7 +75,9 @@ const char *MQTT_TOPIC_AUDIO_BASELINE = "/intercom/audio/baseline";
 const char *MQTT_TOPIC_AUDIO_SAMPLE_RATE = "/intercom/audio/samplerate";
 const char *MQTT_TOPIC_AUDIO_EVENT = "/intercom/audio/event";
 const char *MQTT_TOPIC_INFO = "/intercom/info";
-const char *MQTT_TOPIC_TIME = "/intercom/time"; // incoming
+const char *MQTT_TOPIC_TIME = "/intercom/time";    // incoming
+const char *MQTT_TOPIC_REBOOT = "intercom/reboot"; // incoming
+
 String mqtt_status = "MQTT inactive";
 
 WiFiClient wifiClient;               // The Wifi connection
@@ -517,6 +519,10 @@ void mqttCallback(char *topic, byte *message, unsigned int length)
   {
     statusText = (char *)messageString.c_str();
     displayStatus();
+  }
+  else if (strcmp(topic, MQTT_TOPIC_REBOOT) == 0)
+  {
+    reboot();
   }
 }
 
