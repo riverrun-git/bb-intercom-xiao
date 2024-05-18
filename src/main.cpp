@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <WiFi.h>
 #include <PubSubClient.h> // MQTT
 #include <U8g2lib.h>      // Display
